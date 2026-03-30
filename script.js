@@ -84,12 +84,14 @@ let currentTab = 'calendar';
 // Inicialización
 document.addEventListener('DOMContentLoaded', function() {
     loadData();
+    loadGitHubConfig();
     initCalendar();
     populateFoodSelects();
     renderFoodsCatalog();
     renderAllergensControl();
     renderHistory();
     checkReminders();
+    updateSyncStatus();
 });
 
 // Gestión de datos
@@ -929,6 +931,8 @@ function showTab(tabName) {
         renderHistory();
     } else if (tabName === 'summary') {
         renderSummary();
+    } else if (tabName === 'sync') {
+        updateSyncStatus();
     }
 }
 
@@ -1377,4 +1381,237 @@ function renderEvolutionChart() {
             }
         }
     });
+}
+
+// Sistema de sincronización con GitHub
+let githubConfig = {
+    username: '',
+    token: '',
+    repo: ''
+};
+
+function saveGitHubConfig() {
+    githubConfig.username = document.getElementById('github-username').value;
+    githubConfig.token = document.getElementById('github-token').value;
+    githubConfig.repo = document.getElementById('github-repo').value;
+    
+    if (!githubConfig.username || !githubConfig.token || !githubConfig.repo) {
+        showNotification('Por favor completa todos los campos', 'error');
+        return;
+    }
+    
+    localStorage.setItem('githubConfig', JSON.stringify(githubConfig));
+    updateSyncStatus();
+    showNotification('Configuración guardada correctamente', 'success');
+    addSyncLog('Configuración guardada');
+}
+
+function loadGitHubConfig() {
+    const saved = localStorage.getItem('githubConfig');
+    if (saved) {
+        githubConfig = JSON.parse(saved);
+        document.getElementById('github-username').value = githubConfig.username || '';
+        document.getElementById('github-token').value = githubConfig.token || '';
+        document.getElementById('github-repo').value = githubConfig.repo || '';
+        return true;
+    }
+    return false;
+}
+
+function updateSyncStatus() {
+    const isConfigured = githubConfig.username && githubConfig.token && githubConfig.repo;
+    document.getElementById('config-status').textContent = isConfigured ? 'Configurado' : 'No configurado';
+    document.getElementById('config-status').className = isConfigured ? 'text-green-600' : 'text-red-600';
+    
+    document.getElementById('local-count').textContent = foodEntries.length;
+    
+    const lastSync = localStorage.getItem('lastSync');
+    document.getElementById('last-sync').textContent = lastSync ? new Date(lastSync).toLocaleString() : 'Nunca';
+}
+
+async function testConnection() {
+    if (!githubConfig.username || !githubConfig.token || !githubConfig.repo) {
+        showNotification('Primero configura la sincronización', 'warning');
+        return;
+    }
+    
+    addSyncLog('Probando conexión con GitHub...');
+    
+    try {
+        const response = await fetch(`https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}`, {
+            headers: {
+                'Authorization': `token ${githubConfig.token}`
+            }
+        });
+        
+        if (response.ok) {
+            showNotification('Conexión exitosa con GitHub', 'success');
+            addSyncLog('✅ Conexión exitosa');
+            getRemoteCount();
+        } else {
+            throw new Error('Error de autenticación');
+        }
+    } catch (error) {
+        showNotification('Error de conexión: ' + error.message, 'error');
+        addSyncLog('❌ Error: ' + error.message);
+    }
+}
+
+async function getRemoteCount() {
+    try {
+        const response = await fetch(`https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/data.json`, {
+            headers: {
+                'Authorization': `token ${githubConfig.token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const content = JSON.parse(atob(data.content));
+            document.getElementById('remote-count').textContent = content.length;
+            return content;
+        }
+    } catch (error) {
+        document.getElementById('remote-count').textContent = '0';
+    }
+    return [];
+}
+
+async function syncToGitHub() {
+    if (!githubConfig.username || !githubConfig.token || !githubConfig.repo) {
+        showNotification('Primero configura la sincronización', 'warning');
+        return;
+    }
+    
+    addSyncLog('Subiendo datos a GitHub...');
+    
+    try {
+        const data = JSON.stringify(foodEntries, null, 2);
+        const content = btoa(data);
+        
+        const getResponse = await fetch(`https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/data.json`, {
+            headers: {
+                'Authorization': `token ${githubConfig.token}`
+            }
+        });
+        
+        let body = {
+            message: `Update baby food data - ${new Date().toISOString()}`,
+            content: content
+        };
+        
+        if (getResponse.ok) {
+            const existingData = await getResponse.json();
+            body.sha = existingData.sha;
+        }
+        
+        const response = await fetch(`https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/data.json`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${githubConfig.token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        
+        if (response.ok) {
+            localStorage.setItem('lastSync', new Date().toISOString());
+            updateSyncStatus();
+            showNotification('Datos subidos correctamente', 'success');
+            addSyncLog('✅ Datos subidos exitosamente');
+        } else {
+            throw new Error('Error al subir datos');
+        }
+    } catch (error) {
+        showNotification('Error al sincronizar: ' + error.message, 'error');
+        addSyncLog('❌ Error: ' + error.message);
+    }
+}
+
+async function syncFromGitHub() {
+    if (!githubConfig.username || !githubConfig.token || !githubConfig.repo) {
+        showNotification('Primero configura la sincronización', 'warning');
+        return;
+    }
+    
+    addSyncLog('Descargando datos de GitHub...');
+    
+    try {
+        const response = await fetch(`https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/data.json`, {
+            headers: {
+                'Authorization': `token ${githubConfig.token}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const content = JSON.parse(atob(data.content));
+            
+            if (confirm(`¿Quieres reemplazar tus ${foodEntries.length} registros locales con ${content.length} registros de la nube?`)) {
+                foodEntries = content;
+                saveData();
+                renderAll();
+                localStorage.setItem('lastSync', new Date().toISOString());
+                updateSyncStatus();
+                showNotification('Datos descargados correctamente', 'success');
+                addSyncLog('✅ Datos descargados exitosamente');
+            } else {
+                addSyncLog('❌ Sincronización cancelada por el usuario');
+            }
+        } else {
+            showNotification('No hay datos en la nube', 'info');
+            addSyncLog('ℹ️ No hay datos en la nube');
+        }
+    } catch (error) {
+        showNotification('Error al descargar: ' + error.message, 'error');
+        addSyncLog('❌ Error: ' + error.message);
+    }
+}
+
+async function autoSync() {
+    if (!githubConfig.username || !githubConfig.token || !githubConfig.repo) {
+        showNotification('Primero configura la sincronización', 'warning');
+        return;
+    }
+    
+    addSyncLog('Iniciando sincronización automática...');
+    
+    try {
+        const remoteData = await getRemoteCount();
+        
+        if (remoteData.length === 0) {
+            await syncToGitHub();
+            return;
+        }
+        
+        if (foodEntries.length > remoteData.length) {
+            await syncToGitHub();
+            addSyncLog('✅ Sincronización automática: datos locales subidos');
+        } 
+        else if (remoteData.length > foodEntries.length) {
+            await syncFromGitHub();
+            addSyncLog('✅ Sincronización automática: datos remotos descargados');
+        } else {
+            addSyncLog('✅ Sincronización automática: datos ya están sincronizados');
+            showNotification('Datos ya están sincronizados', 'info');
+        }
+    } catch (error) {
+        showNotification('Error en sincronización automática: ' + error.message, 'error');
+        addSyncLog('❌ Error: ' + error.message);
+    }
+}
+
+function addSyncLog(message) {
+    const log = document.getElementById('sync-log');
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = document.createElement('div');
+    logEntry.textContent = `[${timestamp}] ${message}`;
+    logEntry.className = 'mb-1';
+    
+    log.appendChild(logEntry);
+    log.scrollTop = log.scrollHeight;
+    
+    while (log.children.length > 50) {
+        log.removeChild(log.firstChild);
+    }
 }
