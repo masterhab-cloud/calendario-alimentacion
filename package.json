@@ -1,0 +1,29 @@
+{
+  "name": "baby-food-tracker",
+  "version": "1.0.0",
+  "description": "App para seguimiento de alimentación de bebés con control de alérgenos",
+  "main": "index.html",
+  "scripts": {
+    "start": "http-server -p 8080 -o",
+    "build": "npm run build-pwa && npm run build-android && npm run build-ios",
+    "build-pwa": "workbox generateSW workbox-config.js",
+    "build-android": "capacitor sync android",
+    "build-ios": "capacitor sync ios",
+    "serve": "http-server -p 8080"
+  },
+  "keywords": ["baby", "food", "tracker", "allergens", "mobile"],
+  "author": "Baby Food Tracker",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "workbox-cli": "^7.0.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^5.6.0",
+    "@capacitor/app": "^5.6.0",
+    "@capacitor/core": "^5.6.0",
+    "@capacitor/ios": "^5.6.0",
+    "@capacitor/splash-screen": "^5.6.0",
+    "@capacitor/status-bar": "^5.6.0"
+  }
+}
